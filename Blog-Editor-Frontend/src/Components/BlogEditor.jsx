@@ -9,65 +9,91 @@ const BlogEditor = () => {
   const [timer, setTimer] = useState(null);
   const navigate = useNavigate();
   const { id } = useParams();
-  console.log(id)
+
+  const autoSaveInterval = useRef(null);
+  const latestBlogRef = useRef(blog);
+
+  // Keep ref in sync with blog state
+  useEffect(() => {
+    latestBlogRef.current = blog;
+  }, [blog]);
+
+  // Load blog if editing existing one
   useEffect(() => {
     if (id) {
-      getBlogById(id).then(({ data }) => {
-        setBlog({
-          id: data._id,
-          title: data.title,
-          content: data.content,
-          tags: data.tags.join(', '),
-        });
-      });
+      getBlogById(id)
+        .then(({ data }) => {
+          setBlog({
+            id: data._id,
+            title: data.title,
+            content: data.content,
+            tags: data.tags.join(', '),
+          });
+        })
+        .catch(() => toast.error('Failed to load blog'));
     }
   }, [id]);
 
-  const autoSave = useRef();
-
+  // Auto-save every 30 seconds
   useEffect(() => {
-    autoSave.current = setInterval(() => {
-      if (blog.title || blog.content) handleSave(false); // auto-save every 30 seconds
+    autoSaveInterval.current = setInterval(() => {
+      const current = latestBlogRef.current;
+      if (current.title || current.content) {
+        handleSave(false, true);
+      }
     }, 30000);
-    return () => clearInterval(autoSave.current);
-  }, [blog]);
+    return () => clearInterval(autoSaveInterval.current);
+  }, []);
 
   const handleChange = (e) => {
-    setBlog({ ...blog, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setBlog((prev) => ({ ...prev, [name]: value }));
+
     clearTimeout(timer);
     setTimer(setTimeout(() => {
-      if (autoSave.current && (blog.title || blog.content)) {
-        handleSave(false, true); // auto save
+      const current = latestBlogRef.current;
+      if (current.title || current.content) {
+        handleSave(false, true); // Idle save after 5 seconds
       }
-    }, 5000)); // idle save after 5s auto save
+    }, 5000));
   };
-
 
   const handleSave = async (navigateAfter = false, isAuto = false) => {
+    clearInterval(autoSaveInterval.current);
+    clearTimeout(timer);
+
     const updatedBlog = {
-      ...blog,
-      tags: blog.tags.split(',').map(t => t.trim())
+      ...latestBlogRef.current,
+      tags: latestBlogRef.current.tags.split(',').map(t => t.trim()),
     };
 
-    const res = await createDraft(updatedBlog);
-
-    setBlog(prev => ({
-      ...prev,
-      id: res.data._id
-    }));
-    if (isAuto) toast.success('Draft auto-saved!');
-    if (navigateAfter) navigate('/blogs');
+    try {
+      const res = await createDraft(updatedBlog);
+      setBlog((prev) => ({
+        ...prev,
+        id: res.data._id,
+      }));
+      if (isAuto) toast.success('Draft auto-saved!');
+      if (navigateAfter) navigate('/blogs');
+    } catch (error) {
+      toast.error('Failed to save draft');
+    }
   };
-
 
   const handlePublish = async () => {
-    autoSave.current = false;
-    clearInterval(autoSave.current); // stop interval
-    clearTimeout(timer); // stop idle timeout
-    await publishBlog({ ...blog, tags: blog.tags.split(',').map(t => t.trim()) });
-    navigate('/blogs');
-  };
+    clearInterval(autoSaveInterval.current);
+    clearTimeout(timer);
 
+    try {
+      await publishBlog({
+        ...blog,
+        tags: blog.tags.split(',').map(t => t.trim()),
+      });
+      navigate('/blogs');
+    } catch (error) {
+      toast.error('Failed to publish blog');
+    }
+  };
 
   return (
     <div className="editor-container">
@@ -96,7 +122,13 @@ const BlogEditor = () => {
       />
       <div className="button-group">
         <button className="btn draft-btn" onClick={() => handleSave(true)}>Save as Draft</button>
-        <button className="btn publish-btn" onClick={handlePublish}>Publish</button>
+        <button
+          className="btn publish-btn"
+          onClick={handlePublish}
+          disabled={!blog.title || !blog.content}
+        >
+          Publish
+        </button>
       </div>
     </div>
   );

@@ -18,11 +18,8 @@ const handleDelete = (id) => {
   });
 };
 
-
   const published = blogs.filter(b => b.status === 'published');
   const drafts = blogs.filter(b => b.status === 'draft');
-
-  console.log(drafts)
 
   return (
     <div className="container">
